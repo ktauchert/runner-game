@@ -3,6 +3,7 @@ import "./App.css";
 import { Canvas, useFrame, useThree } from "@react-three/fiber";
 import { Sky } from "@react-three/drei";
 import * as THREE from "three";
+import { Leva, useControls } from "leva";
 import { useGameStore, GameState, GateType } from "./store/useGameStore";
 import Runner from "./components/Runner";
 import Arena from "./components/Arena";
@@ -11,7 +12,7 @@ import CrowdManager from "./components/CrowdManager";
 import EnemyGroup from "./components/EnemyGroup";
 import GameUI from "./components/GameUI";
 import ParticleSystem from "./components/ParticleSystem";
-import { Leva, useControls } from "leva";
+import FinishLine from "./components/FinishLine";
 
 // Import sound manager
 import { SoundManager } from "./utils/soundManager";
@@ -125,6 +126,9 @@ function App() {
   const [showWarning, setShowWarning] = useState(false);
   const [warningLevel, setWarningLevel] = useState(0);
   const [showParticles, setShowParticles] = useState(false);
+  const currentStage = useGameStore((state) => state.currentStage);
+  const finishLinePosition = useGameStore((state) => state.finishLinePosition);
+  const advanceStage = useGameStore((state) => state.advanceStage);
 
   // Reset enemy position when game state changes to READY
   useEffect(() => {
@@ -135,6 +139,29 @@ function App() {
       console.log("Reset enemy position to 150");
     }
   }, [gameState, setEnemyPosition]);
+
+  // Handle stage transitions after battle
+  useEffect(() => {
+    const setGameState = useGameStore.getState().setGameState;
+    
+    if (gameState === GameState.WIN && currentStage < 2) {
+      // Short delay then advance to next stage with new enemies
+      const nextStageTimer = setTimeout(() => {
+        advanceStage();
+        setGameState(GameState.RUNNING);
+        
+        // Set new enemy position for next stage
+        enemyPositionRef.current = currentStage === 1 ? 100 : finishLinePosition;
+        setEnemyPosition(enemyPositionRef.current);
+        setWarningLevel(0);
+        
+        if (soundEnabled) SoundManager.play("buttonClick");
+        
+      }, 2000);
+      
+      return () => clearTimeout(nextStageTimer);
+    }
+  }, [gameState, currentStage, advanceStage, setEnemyPosition, finishLinePosition, soundEnabled]);
 
   // Sound effects
   useEffect(() => {
@@ -175,13 +202,22 @@ function App() {
         enemyPositionRef.current -= delta * currentSpeed;
         setEnemyPosition(enemyPositionRef.current);
 
-        // Check for warnings at different distances
-        if (enemyPositionRef.current <= 100 && warningLevel < 1) {
+        // Check for finish line collision - this happens in the FinishLine component
+        // but we also need to know if we're close to the finish line
+        if (currentStage >= 2 && Math.abs(enemyPositionRef.current - finishLinePosition) <= 40 && warningLevel < 1) {
           setWarningLevel(1);
           setShowWarning(true);
           setTimeout(() => setShowWarning(false), 3000);
           if (soundEnabled) SoundManager.play("warning");
-        } else if (enemyPositionRef.current <= 70 && warningLevel < 2) {
+        }
+
+        // Check for warnings at different distances for enemy encounters
+        else if (currentStage < 2 && enemyPositionRef.current <= 100 && warningLevel < 1) {
+          setWarningLevel(1);
+          setShowWarning(true);
+          setTimeout(() => setShowWarning(false), 3000);
+          if (soundEnabled) SoundManager.play("warning");
+        } else if (currentStage < 2 && enemyPositionRef.current <= 70 && warningLevel < 2) {
           setWarningLevel(2);
           setShowWarning(true);
           setTimeout(() => setShowWarning(false), 3000);
@@ -265,14 +301,16 @@ function App() {
       {showWarning && (
         <div className="warning-message">
           <h2 style={{ color: "white", margin: 0 }}>
-            {warningLevel === 1 && "ENEMIES DETECTED AHEAD!"}
-            {warningLevel === 2 && "WARNING: ENEMY FORCES APPROACHING!"}
-            {warningLevel === 3 && "DANGER! PREPARE FOR BATTLE!"}
+            {currentStage >= 2 && warningLevel === 1 && "FINISH LINE AHEAD!"}
+            {currentStage < 2 && warningLevel === 1 && "ENEMIES DETECTED AHEAD!"}
+            {currentStage < 2 && warningLevel === 2 && "WARNING: ENEMY FORCES APPROACHING!"}
+            {currentStage < 2 && warningLevel === 3 && "DANGER! PREPARE FOR BATTLE!"}
           </h2>
           <p style={{ color: "white", marginTop: "10px" }}>
-            {warningLevel === 1 && "Enemy crowd spotted in the distance"}
-            {warningLevel === 2 && `${enemyCount} enemies approaching fast!`}
-            {warningLevel === 3 && "BATTLE IMMINENT!"}
+            {currentStage >= 2 && warningLevel === 1 && "Reach the finish line to complete the level!"}
+            {currentStage < 2 && warningLevel === 1 && "Enemy crowd spotted in the distance"}
+            {currentStage < 2 && warningLevel === 2 && `${enemyCount} enemies approaching fast!`}
+            {currentStage < 2 && warningLevel === 3 && "BATTLE IMMINENT!"}
           </p>
         </div>
       )}
@@ -326,6 +364,37 @@ function App() {
             
             <button className="play-again-button" onClick={resetGame}>
               Play Again
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Level Complete screen */}
+      {gameState === GameState.LEVEL_COMPLETE && (
+        <div className="end-screen">
+          <div className="end-content">
+            <h1 className="victory-title">Level Complete!</h1>
+            <div className="level-stats">
+              <div className="level-stat">
+                <span className="label">Level:</span>
+                <span className="value">{level}</span>
+              </div>
+              <div className="level-stat">
+                <span className="label">Survivors:</span>
+                <span className="value">{crowdCount}</span>
+              </div>
+              <div className="level-stat">
+                <span className="label">Bonus:</span>
+                <span className="value">+{level * crowdCount * 10}</span>
+              </div>
+              <div className="level-stat total-score">
+                <span className="label">Total Score:</span>
+                <span className="value">{score}</span>
+              </div>
+            </div>
+            
+            <button className="next-level-button" onClick={useGameStore((state) => state.nextLevel)}>
+              Next Level
             </button>
           </div>
         </div>
@@ -408,6 +477,18 @@ function App() {
           />
         )}
         
+        {gameState === GameState.LEVEL_COMPLETE && (
+          <ParticleSystem 
+            position={[0, 2, 0]}
+            color="#ffff00" 
+            count={500}
+            size={0.15}
+            spread={8}
+            emitting={true}
+            event="victory"
+          />
+        )}
+        
         {/* Gates - show all gates in gameplay */}
         {gameState === GameState.RUNNING &&
           gates.map((gate) => (
@@ -419,13 +500,20 @@ function App() {
             />
           ))}
           
-        {/* Enemy group at the end */}
-        {gameState !== GameState.READY ? (
+        {/* Enemy group based on stage */}
+        {(gameState !== GameState.READY && gameState !== GameState.LEVEL_COMPLETE) && (
           <EnemyGroup
             position={[0, 0, enemyPositionRef.current]}
-            enemyCount={Math.floor(enemyStartingCount)}
+            enemyCount={Math.floor(currentStage === 1 
+              ? enemyStartingCount 
+              : enemyStartingCount * 1.5)} // Second stage has more enemies
           />
-        ) : null}
+        )}
+
+        {/* Finish line - only show after defeating the second enemy group */}
+        {gameState === GameState.RUNNING && currentStage >= 2 && (
+          <FinishLine position={[0, 0, finishLinePosition]} />
+        )}
       </Canvas>
 
       {/* Hide Leva UI completely */}

@@ -1,12 +1,13 @@
 import { create } from "zustand";
 
-export type GameState = "ready" | "running" | "battle" | "win" | "lose";
+export type GameState = "ready" | "running" | "battle" | "win" | "lose" | "level_complete";
 export const GameState = {
   READY: "ready" as GameState,
   RUNNING: "running" as GameState,
   BATTLE: "battle" as GameState,
   WIN: "win" as GameState,
   LOSE: "lose" as GameState,
+  LEVEL_COMPLETE: "level_complete" as GameState,
 };
 
 export type GateType = "add" | "subtract" | "multiply" | "divide";
@@ -50,6 +51,12 @@ interface GameStore {
   setBattleStatus: (status: BattleStatus) => void;
   battleDuration: number; // How long battles last (in seconds)
   
+  // Finish line properties
+  finishLinePosition: number;
+  setFinishLinePosition: (position: number) => void;
+  currentStage: number; // Tracks which enemy group the player is facing (1, 2, etc.)
+  advanceStage: () => void;
+  
   // Game properties
   speed: number;
   setSpeed: (speed: number) => void;
@@ -64,6 +71,8 @@ interface GameStore {
   startGame: () => void;
   startBattle: () => void;
   endBattle: (won: boolean) => void;
+  completeLevel: () => void;
+  nextLevel: () => void;
   resetGame: () => void;
 }
 
@@ -118,6 +127,16 @@ export const useGameStore = create<GameStore>((set) => ({
   setBattleStatus: (status: BattleStatus) => set({ battleStatus: status }),
   battleDuration: 3, // 3 seconds by default
   
+  // Finish line properties
+  finishLinePosition: 250, // Position of the finish line (after two enemy battles)
+  setFinishLinePosition: (position) => set({ finishLinePosition: position }),
+  currentStage: 1, // Start at stage 1
+  advanceStage: () => set((state) => ({ 
+    currentStage: state.currentStage + 1,
+    // Reset enemy position for next stage
+    enemyPosition: state.currentStage === 1 ? 100 : state.finishLinePosition
+  })),
+  
   // Game properties
   speed: 5, // Units per second
   setSpeed: (speed) => set({ speed }),
@@ -132,7 +151,8 @@ export const useGameStore = create<GameStore>((set) => ({
   startGame: () => set({ 
     gameState: GameState.RUNNING,
     battleStatus: "none",
-    score: 0
+    currentStage: 1,
+    enemyPosition: 150
   }),
   
   startBattle: () => set((state) => ({
@@ -143,17 +163,54 @@ export const useGameStore = create<GameStore>((set) => ({
   })),
   
   endBattle: (won) => set((state) => {
-    // Calculate score from battle
+    // Calculate battle score
     const scoreChange = won 
-      ? Math.floor(state.initialEnemyCount * 10) 
+      ? Math.floor(state.initialEnemyCount * 5) 
       : 0;
-      
+    
+    // If the player loses, game over
+    if (!won) {
+      return {
+        gameState: GameState.LOSE,
+        battleStatus: "defeat",
+        score: state.score + scoreChange
+      };
+    }
+    
+    // If player wins and there are more stages to go
+    if (state.currentStage < 2) {
+      return {
+        gameState: GameState.RUNNING,
+        battleStatus: "victory",
+        score: state.score + scoreChange
+      };
+    }
+    
+    // If player wins the final stage, advance to finish line
     return {
-      gameState: won ? GameState.WIN : GameState.LOSE,
-      battleStatus: won ? "victory" : "defeat",
+      gameState: GameState.RUNNING,
+      battleStatus: "victory",
       score: state.score + scoreChange
     };
   }),
+  
+  completeLevel: () => set((state) => {
+    // Calculate finish line bonus based on level difficulty and remaining crowd
+    const levelBonus = state.level * state.crowdCount * 10;
+    
+    return {
+      gameState: GameState.LEVEL_COMPLETE,
+      score: state.score + levelBonus
+    };
+  }),
+  
+  nextLevel: () => set((state) => ({
+    gameState: GameState.READY,
+    level: state.level + 1,
+    currentStage: 1,
+    crowdCount: Math.max(1, Math.floor(state.crowdCount / 2)), // Start with half the crowd from previous level
+    enemyPosition: 150
+  })),
   
   resetGame: () => set({
     gameState: GameState.READY,
@@ -166,6 +223,8 @@ export const useGameStore = create<GameStore>((set) => ({
     enemyPosition: 150,
     speed: 5,
     level: 1,
-    score: 0
+    score: 0,
+    currentStage: 1,
+    finishLinePosition: 250
   }),
 }));

@@ -28,8 +28,8 @@ const Runner = ({ position = [0, 0, 0] }: Props) => {
     let xPosition = runnerPosition;
 
     // Handle keyboard input
-    if (keys.left) xPosition -= moveSpeed * delta;
-    if (keys.right) xPosition += moveSpeed * delta;
+    if (keys.left) xPosition += moveSpeed * delta;
+    if (keys.right) xPosition -= moveSpeed * delta;
 
     // Clamp position to limits (-5 to 5)
     xPosition = Math.max(-5, Math.min(5, xPosition));
